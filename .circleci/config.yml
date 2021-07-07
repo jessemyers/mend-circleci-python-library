@@ -1,0 +1,168 @@
+---
+version: 2.1
+
+jobs:
+  install:
+    working_directory: ~/repo
+    docker:
+      - image: cimg/python:3.9.6
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - setup-py-\{\{ checksum "setup.py" \}\}
+      - run:
+          name: "Install dependencies"
+          command: |
+            python3 -m venv venv
+            . venv/bin/activate
+            pip install .[dist,lint,test,types]
+      - save_cache:
+          paths:
+            - ./venv
+          key: setup-py-\{\{ checksum "setup.py" \}\}
+      - persist_to_workspace:
+          root: ~/repo
+          paths:
+            - .
+
+  lint:
+    working_directory: ~/repo
+    docker:
+      - image: cimg/python:3.9.6
+    steps:
+      - attach_workspace:
+          at: ~/repo
+      - run:
+          name: "Run flake8"
+          command: |
+            . venv/bin/activate
+            flake8 mend_circleci_python_library
+
+  test:
+    working_directory: ~/repo
+    docker:
+      - image: cimg/python:3.9.6
+    steps:
+      - attach_workspace:
+          at: ~/repo
+      - run:
+          name: "Run pytest"
+          command: |
+            . venv/bin/activate
+            pytest mend_circleci_python_library
+
+  types:
+    working_directory: ~/repo
+    docker:
+      - image: cimg/python:3.9.6
+    steps:
+      - attach_workspace:
+          at: ~/repo
+      - run:
+          name: "Run mypy"
+          command: |
+            . venv/bin/activate
+            mypy mend_circleci_python_library
+
+  release:
+    working_directory: ~/repo
+    docker:
+      - image: cimg/python:3.9.6
+    steps:
+      - attach_workspace:
+          at: ~/repo
+      - run:
+          name: Configure .pypirc
+          command: |
+            echo -e "[pypi]" >> ~/.pypirc
+            echo -e "username = $PYPI_USERNAME" >> ~/.pypirc
+            echo -e "password = $PYPI_PASSWORD" >> ~/.pypirc
+      - run:
+          name: Create distributions
+          command: |
+            . venv/bin/activate
+            python setup.py sdist
+            python setup.py bdist_wheel
+      - run:
+          name: Upload to pypi
+          command: |
+            . venv/bin/activate
+            twine upload dist/*
+
+workflows:
+  version: 2
+  build:
+    jobs:
+      - install
+      - lint:
+          requires:
+            - install
+          filters:
+            tags:
+              only: /.*/
+      - test:
+          requires:
+            - install
+          filters:
+            tags:
+              only: /.*/
+      - types:
+          requires:
+            - install
+          filters:
+            tags:
+              only: /.*/
+      - release:
+          requires:
+            - test
+            - lint
+            - types
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^[0-9]+(\.[0-9]+)*/
+
+  release:
+    jobs:
+      - install:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^[0-9]+(\.[0-9]+)*/
+      - lint:
+          requires:
+            - install
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^[0-9]+(\.[0-9]+)*/
+      - test:
+          requires:
+            - install
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^[0-9]+(\.[0-9]+)*/
+      - types:
+          requires:
+            - install
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^[0-9]+(\.[0-9]+)*/
+      - release:
+          requires:
+            - test
+            - lint
+            - types
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^[0-9]+(\.[0-9]+)*/
